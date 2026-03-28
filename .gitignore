@@ -1,0 +1,26 @@
+# Environment variables
+.env
+
+# Dependencies
+node_modules/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Databases (optional, but usually ignored)
+database.sqlite
+
+# OS generated files
+.DS_Store
+Thumbs.db

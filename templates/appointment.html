@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Consultation Room - Medicare</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://meet.jit.si/external_api.js"></script>
+</head>
+<body style="height: 100vh; overflow: hidden; display: flex; flex-direction: column;">
+  <!-- Global Loader -->
+  <div id="global-loader" class="hidden">
+    <div class="spinner"></div>
+  </div>
+
+  <nav class="landing-nav" style="padding: 16px 32px;">
+    <div class="brand">🩺 Medicare Consultation</div>
+    <div class="nav-links">
+      <span id="userName" style="font-weight: 500; margin-right: 24px; color: var(--text-muted);"></span>
+      <button onclick="window.location.href='/dashboard'" class="secondary">Leave Room</button>
+    </div>
+  </nav>
+
+  <div style="display: flex; flex: 1; overflow: hidden; background: var(--bg-light);">
+    <!-- Video Panel -->
+    <div style="flex: 2; border-right: 1px solid var(--border-color); background: #0f172a; display: flex; flex-direction: column;">
+      <div id="jitsiContainer" style="width: 100%; height: calc(100% - 70px);"></div>
+      <div style="height: 70px; background: #1e293b; display: flex; align-items: center; justify-content: center; gap: 16px;">
+        <button class="secondary" onclick="toggleMute()" style="border-radius: 20px;">🎤 Mute/Unmute</button>
+        <button class="secondary" onclick="toggleVideo()" style="border-radius: 20px;">📷 Video On/Off</button>
+        <button onclick="endCall()" style="background: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 20px; cursor: pointer; font-weight: bold;">End Call</button>
+      </div>
+    </div>
+
+    <!-- Right Panel (Doctor: AI + Prescription / Patient: Prescription View) -->
+    <div id="sidePanel" class="card" style="flex: 1; margin: 24px; overflow-y: auto; height: calc(100% - 48px);">
+      <h2 id="panelTitle" style="color: var(--primary);">Connecting...</h2>
+      
+      <!-- Doctor Mode -->
+      <div id="doctorTools" class="hidden">
+        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 24px;">
+          <h4 style="color: var(--accent); margin-bottom: 8px;">🤖 AI Diagnostician</h4>
+          <p class="text-muted" style="font-size: 0.9rem; margin-bottom: 12px;">Type patient symptoms to instantly get suggested diagnoses and medicinal plans.</p>
+          <textarea id="symptomsInput" rows="2" placeholder="e.g., fever, cough, stomach ache..."></textarea>
+          <button onclick="getAIAdvice()" class="secondary" style="width: 100%;">Get AI Suggestion</button>
+        </div>
+
+        <h4>📜 Final Prescription</h4>
+        <div class="flex-col">
+          <input type="text" id="pDiagnosis" placeholder="Final Diagnosis">
+          <textarea id="pMedicines" rows="3" placeholder="Medicines & Dosage"></textarea>
+          <textarea id="pAdvice" rows="2" placeholder="Precautions & Advice"></textarea>
+          <input type="text" id="pFollowup" placeholder="Follow-up Instruction (e.g. 7 Days)">
+          
+          <button onclick="savePrescription()" class="success mt-4">Save & Generate PDF</button>
+        </div>
+      </div>
+
+      <!-- Patient Mode -->
+      <div id="patientTools" class="hidden">
+        <h3 style="color: var(--secondary); margin-bottom: 16px;">Your Prescription</h3>
+        <p class="text-muted">If the doctor has finalized your prescription during or after this call, it will appear here safely.</p>
+        <button onclick="loadPrescription()" class="secondary mt-4" style="width: 100%;">Check for Prescription</button>
+        
+        <div id="prescriptionView" class="hidden mt-4" style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <p class="mb-2"><strong>Diagnosis:</strong> <span id="vDiag" style="color: var(--primary);"></span></p>
+          <p class="mb-2"><strong>Medicines:</strong> <span id="vMed"></span></p>
+          <p class="mb-2"><strong>Advice:</strong> <span id="vAdv"></span></p>
+          <p class="mb-4"><strong>Follow-up:</strong> <span id="vFol"></span></p>
+          <button onclick="downloadPdf()" class="success" style="width: 100%;">Download PDF Official Copy</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    const user = getUser();
+    if (!user) window.location.href = '/';
+
+    const apptId = {{ appt_id }};
+    document.getElementById('userName').innerText = "Logged in as: " + user.name;
+    
+    // Init Room
+    async function initRoom() {
+      showLoader();
+      try {
+        const appts = await apiCall('/api/appointments');
+        const currentAppt = appts.find(a => a.id === apptId);
+        
+        if (!currentAppt) {
+          showToast("Appointment not found or unauthorized.", "error");
+          hideLoader();
+          return;
+        }
+
+        // Setup Jitsi API
+        const domain = 'meet.jit.si';
+        const options = {
+            roomName: currentAppt.meeting_link,
+            width: '100%',
+            height: '100%',
+            parentNode: document.getElementById('jitsiContainer'),
+            userInfo: {
+                displayName: user.name
+            },
+            configOverwrite: { startWithAudioMuted: false, startWithVideoMuted: false }
+        };
+        api = new JitsiMeetExternalAPI(domain, options);
+
+        // Setup Panel
+        if (user.role === 'doctor') {
+          document.getElementById('panelTitle').innerText = "Doctor Workbench";
+          document.getElementById('doctorTools').classList.remove('hidden');
+        } else {
+          document.getElementById('panelTitle').innerText = "Consultation Info";
+          document.getElementById('patientTools').classList.remove('hidden');
+          loadPrescription();
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+      hideLoader();
+    }
+
+    let api = null;
+    function toggleMute() { if(api) api.executeCommand('toggleAudio'); }
+    function toggleVideo() { if(api) api.executeCommand('toggleVideo'); }
+    function endCall() { 
+        if(api) api.dispose(); 
+        window.location.href='/dashboard'; 
+    }
+
+    async function getAIAdvice() {
+      const symp = document.getElementById('symptomsInput').value;
+      if (!symp) { showToast("Please enter symptoms first.", "error"); return; }
+
+      showLoader();
+      try {
+        const aiData = await apiCall('/api/ai/generate-prescription', 'POST', { symptoms: symp, history: "" });
+        
+        document.getElementById('pDiagnosis').value = aiData.diagnosis;
+        document.getElementById('pMedicines').value = aiData.medicines;
+        document.getElementById('pAdvice').value = aiData.advice;
+
+        showToast("AI Suggestions applied successfully.");
+      } catch (e) {
+        showToast("Failed to reach AI service.", "error");
+      }
+      hideLoader();
+    }
+
+    async function savePrescription() {
+      const data = {
+        symptoms: document.getElementById('symptomsInput').value || "Not specified",
+        diagnosis: document.getElementById('pDiagnosis').value,
+        medicines: document.getElementById('pMedicines').value,
+        advice: document.getElementById('pAdvice').value,
+        follow_up: document.getElementById('pFollowup').value
+      };
+
+      try {
+        await apiCall(`/api/appointments/${apptId}/prescription`, 'POST', data);
+        showToast("Prescription Saved and PDF Generated!", "success");
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    async function loadPrescription() {
+      try {
+        const p = await apiCall(`/api/appointments/${apptId}/prescription`);
+        document.getElementById('prescriptionView').classList.remove('hidden');
+        document.getElementById('vDiag').innerText = p.diagnosis;
+        document.getElementById('vMed').innerText = p.medicines;
+        document.getElementById('vAdv').innerText = p.advice;
+        document.getElementById('vFol').innerText = p.follow_up || 'None';
+        showToast("Prescription loaded.");
+      } catch (e) {
+        console.log("Prescription not found yet.");
+      }
+    }
+
+    function downloadPdf() {
+        window.open(`/api/prescriptions/${apptId}/download`, '_blank');
+    }
+
+    initRoom();
+  </script>
+</body>
+</html>
